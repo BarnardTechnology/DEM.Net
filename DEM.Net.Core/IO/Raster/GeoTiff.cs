@@ -31,6 +31,7 @@ using System.Diagnostics;
 using System.Collections.Generic;
 using System.Linq;
 using System.IO;
+using System.Collections.Concurrent;
 
 namespace DEM.Net.Core
 {
@@ -41,7 +42,7 @@ namespace DEM.Net.Core
         string _tiffPath;
         //static NoLogTiffErrorHandler _errorHandler = new NoLogTiffErrorHandler();
         TraceTiffErrorHandler _traceLogHandler = new TraceTiffErrorHandler();
-        Dictionary<int, byte[]> tilesCache;
+        ConcurrentDictionary<int, byte[]> tilesCache = new ConcurrentDictionary<int, byte[]>();
 
         internal Tiff TiffFile
         {
@@ -169,14 +170,23 @@ namespace DEM.Net.Core
                     var tileX = (x / tileWidth) * tileWidth;
                     var tileY = (y / tileHeight) * tileHeight;
 
-                    if (tilesCache == null) tilesCache = new Dictionary<int, byte[]>();
+                    //if (tilesCache == null) tilesCache = new ConcurrentDictionary<int, byte[]>();
                     var tileKey = (x / tileWidth) + (y / tileHeight) * (metadata.Width / tileWidth + 1);
-                    if (!tilesCache.TryGetValue(tileKey, out buffer))
+                    lock (tilesCache)
                     {
-                        buffer = new byte[tileSize];
-                        TiffFile.ReadTile(buffer, 0, tileX, tileY, 0, 0);
-                        tilesCache.Add(tileKey, buffer);
+                        buffer = tilesCache.GetOrAdd(tileKey, (key) =>
+                        {
+                            var buf = new byte[tileSize];
+                            TiffFile.ReadTile(buf, 0, tileX, tileY, 0, 0);
+                            return buf;
+                        });
                     }
+                    //if (!tilesCache.TryGetValue(tileKey, out buffer))
+                    //{
+                    //    buffer = new byte[tileSize];
+                    //    TiffFile.ReadTile(buffer, 0, tileX, tileY, 0, 0);
+                    //    tilesCache.Add(tileKey, buffer);
+                    //}
                     var offset = x - tileX + (y - tileY) * tileHeight;
                     heightValue = GetElevationAtPoint(metadata, offset, buffer);
                 }
@@ -401,14 +411,20 @@ namespace DEM.Net.Core
                         var tileX = (x / tileWidth) * tileWidth;
                         var tileY = (y / tileHeight) * tileHeight;
 
-                        if (tilesCache == null) tilesCache = new Dictionary<int, byte[]>();
+                        //if (tilesCache == null) tilesCache = new ConcurrentDictionary<int, byte[]>();
                         var tileKey = (x / tileWidth) + (y / tileHeight) * (metadata.Width / tileWidth + 1);
-                        if (!tilesCache.TryGetValue(tileKey, out buffer))
+                        buffer = tilesCache.GetOrAdd(tileKey, (key) =>
                         {
-                            buffer = new byte[tileSize];
-                            TiffFile.ReadTile(buffer, 0, tileX, tileY, 0, 0);
-                            tilesCache.Add(tileKey, buffer);
-                        }
+                            var buf = new byte[tileSize];
+                            TiffFile.ReadTile(buf, 0, tileX, tileY, 0, 0);
+                            return buf;
+                        });
+                        //if (!tilesCache.TryGetValue(tileKey, out buffer))
+                        //{
+                        //    buffer = new byte[tileSize];
+                        //    TiffFile.ReadTile(buffer, 0, tileX, tileY, 0, 0);
+                        //    tilesCache.Add(tileKey, buffer);
+                        //}
                         var offset = x - tileX + (y - tileY) * tileHeight;
                         float heightValue = GetElevationAtPoint(metadata, offset, buffer);
                         if (heightValue <= 0)
